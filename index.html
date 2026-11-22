@@ -1,1 +1,244 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OMR Marker</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,sans-serif;background:#f3f4f6;padding-bottom:70px}
+header{background:#1d4ed8;color:#fff;padding:12px 16px;font-weight:700;font-size:18px}
+section{display:none;padding:14px}section.on{display:block}
+nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:#fff;border-top:1px solid #ccc}
+nav button{flex:1;padding:12px 2px;border:0;background:none;font-size:12px}nav button.on{color:#1d4ed8;font-weight:700}
+label{display:block;margin:8px 0 2px;font-size:13px;color:#444}
+input,select,textarea{width:100%;padding:11px;font-size:16px;border:1px solid #bbb;border-radius:8px}
+.b{padding:12px 16px;margin:6px 4px 0 0;border:0;border-radius:8px;background:#1d4ed8;color:#fff;font-size:15px}
+.b.g{background:#16a34a}.b.r{background:#dc2626}.b.x{background:#6b7280}
+.card{background:#fff;border-radius:10px;padding:12px;margin-bottom:12px}
+.chips{display:grid;grid-template-columns:repeat(6,1fr);gap:5px}
+.chip{padding:7px 0;text-align:center;border-radius:6px;color:#fff;font-size:12px}
+.ok{background:#16a34a}.bad{background:#dc2626}.dbl{background:#f97316}.blk{background:#9ca3af}
+canvas,video{width:100%;border-radius:8px}table{width:100%;border-collapse:collapse;font-size:13px}
+td,th{border-bottom:1px solid #ddd;padding:6px 3px;text-align:left}
+#sheetWrap{overflow:auto;background:#888;padding:8px}
+.sheet{position:relative;width:210mm;height:297mm;background:#fff;font-size:9pt}
+.sheet div{position:absolute}.cn{width:10mm;height:10mm;background:#000}
+.c{width:6mm;height:6mm;border:.3mm solid #aaa;border-radius:50%;font-size:6pt;color:#bbb;text-align:center;line-height:5.4mm}
+@media print{body *{visibility:hidden}#sheetWrap,#sheetWrap *{visibility:visible}#sheetWrap{position:absolute;left:0;top:0;padding:0;background:#fff}@page{size:A4;margin:0}}
+</style></head><body>
+<header>📋 OMR Marker <span id="ready" style="font-size:12px;font-weight:400"> (loading scanner...)</span></header>
 
+<section id="home" class="on"><div class="card">
+<label>School name</label><input id="school" placeholder="School name">
+<label>Subject</label><select id="subj"></select>
+<label>Class / Section</label><input id="cls">
+<label>Test name</label><input id="test" value="Test 1">
+<label>Paper set</label><select id="set"><option>A</option><option>B</option><option>C</option><option>D</option></select>
+<p id="keyinfo"></p></div>
+<div class="card"><b>School codes (one per line, e.g. 01=City School). Leave empty if one school.</b><textarea id="schools" rows="3"></textarea><b>Pass %</b><input id="pass" type="number" value="40">
+<b>Blue mark threshold % (lower = more sensitive)</b><input id="thr" type="number" value="5">
+<button class="b x" onclick="saveCfg()">Save settings</button>
+<button class="b x" onclick="backup()">Backup data</button>
+<button class="b x" onclick="document.getElementById('rf').click()">Restore data</button>
+<input type="file" id="rf" hidden accept=".json"></div></section>
+
+<section id="keys"><div class="card"><b>Answer key for the selected subject / test / set</b>
+<p id="keyinfo2"></p>
+<label>Paste key: 30 letters (ABCD...) or "1-A, 2-B..." or one per line</label>
+<textarea id="kt" rows="4"></textarea>
+<button class="b" onclick="pasteKey()">Parse &amp; preview</button>
+<button class="b g" onclick="saveKey()">Save key</button>
+<button class="b x" onclick="copyKey()">Copy to other set...</button></div>
+<div class="card"><b>Key grid (tap to change)</b><div id="kg" class="chips"></div></div>
+<div class="card"><b>Import keys from Excel</b><p style="font-size:12px">Columns: Subject, Test, Set, Q1..Q30</p>
+<input type="file" id="kx" accept=".xlsx,.xls,.csv">
+<button class="b x" onclick="keyTemplate()">Download template</button></div></section>
+
+<section id="scan"><div class="card"><p id="scaninfo"></p>
+<video id="vid" playsinline muted style="display:none"></video>
+<button class="b" onclick="startCam()">📷 Open camera</button>
+<button class="b g" onclick="snap()">Capture</button>
+<button class="b x" onclick="document.getElementById('up').click()">Upload photo</button>
+<input type="file" id="up" accept="image/*" hidden>
+<p id="msg" style="color:#dc2626"></p></div></section>
+
+<section id="review"><div class="card"><canvas id="cv"></canvas></div>
+<div class="card"><label>Name as written on sheet</label><img id="nimg" style="width:100%;border:1px solid #ccc;border-radius:6px;background:#fff">
+<button class="b x" onclick="ocrName()">Auto-read name</button><p id="hm" style="font-size:12px;color:#92400e"></p>
+<label>Student name</label><input id="sn"><label>Roll no</label><input id="rn"><label>School</label><input id="sc">
+<h3 id="score"></h3><div id="chips" class="chips"></div>
+<p style="font-size:12px">Tap a chip to change: A→B→C→D→blank.</p>
+<button class="b g" onclick="saveRes(false)">Save</button>
+<button class="b" onclick="saveRes(true)">Save &amp; scan next</button></div></section>
+
+<section id="results"><div class="card"><input id="q" placeholder="Search name / roll" oninput="renderRes()">
+<div style="overflow:auto"><table id="rt"></table></div>
+<button class="b g" onclick="exportX(false)">Export this subject</button>
+<button class="b" onclick="exportX(true)">Export all subjects</button></div></section>
+
+<section id="print"><div class="card"><button class="b" onclick="window.print()">🖨 Print (100% scale, no "fit to page")</button>
+<p style="font-size:12px">Choose "Save as PDF" in the print dialog for a PDF.</p></div>
+<div id="sheetWrap"></div></section>
+
+<nav id="nav"></nav>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script async src="https://docs.opencv.org/4.x/opencv.js"></script>
+<script>
+const SUBJ=["Biology","Computer","Physics","Chemistry","English","General Knowledge","Maths"];
+const L={cols:[15,78,141],y0:70,dy:20,dx:10,ox:14,r:3,reg:5,S:5,H:{x:132,s:6,r:2.5,roll:[22,27.5,33,38.5],sch:[49,54.5],sub:{x:24,s:14,y:48}}}; // mm layout; S = px per mm after warp
+const pos=(q,o)=>[L.cols[Math.floor(q/10)]+L.ox+o*L.dx,L.y0+(q%10)*L.dy];
+const $=id=>document.getElementById(id), LS=k=>JSON.parse(localStorage.getItem(k)||'null');
+let KEYS=LS('keys')||{}, RES=LS('res')||[], CFG=LS('cfg')||{school:'',pass:40,thr:5}, cur=null, kdraft=Array(30).fill('-'), stream=null;
+const save=()=>{localStorage.setItem('keys',JSON.stringify(KEYS));localStorage.setItem('res',JSON.stringify(RES));localStorage.setItem('cfg',JSON.stringify(CFG))};
+const kid=()=>[$('subj').value,$('test').value.trim(),$('set').value].join('|');
+const today=()=>new Date().toISOString().slice(0,10);
+
+// navigation
+const tabs=[['home','🏠 Home'],['keys','🔑 Keys'],['scan','📷 Scan'],['review','✅ Review'],['results','📊 Results'],['print','🖨 Sheet']];
+$('nav').innerHTML=tabs.map(t=>`<button data-t="${t[0]}" onclick="go('${t[0]}')">${t[1]}</button>`).join('');
+function go(t){document.querySelectorAll('section').forEach(s=>s.classList.toggle('on',s.id==t));
+ document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.t==t));
+ if(t=='keys')drawKG();if(t=='results')renderRes();if(t=='scan')info();if(t=='home')info();location.hash=t}
+$('subj').innerHTML=SUBJ.map(s=>`<option>${s}</option>`).join('');
+$('school').value=CFG.school;$('schools').value=CFG.schools||'';$('pass').value=CFG.pass;$('thr').value=CFG.thr;
+['subj','test','set','cls'].forEach(i=>$(i).onchange=info);
+function saveCfg(){CFG={school:$('school').value,schools:$('schools').value,pass:+$('pass').value,thr:+$('thr').value};save();renderSheet();alert('Saved')}
+function info(){const k=KEYS[kid()];const t=k?`✅ Key loaded: ${kid().replace(/\|/g,' - ')}`:`⚠️ No key for ${kid().replace(/\|/g,' - ')}`;
+ $('keyinfo').textContent=t;$('keyinfo2').textContent=t;$('scaninfo').textContent=t}
+
+// keys
+function drawKG(){kdraft=KEYS[kid()]?KEYS[kid()].split(''):kdraft;
+ $('kg').innerHTML=kdraft.map((a,i)=>`<div class="chip x" style="background:#1d4ed8" onclick="cyc(${i})">${i+1}:${a}</div>`).join('')}
+function cyc(i){const o=['-','A','B','C','D'];kdraft[i]=o[(o.indexOf(kdraft[i])+1)%5];drawKG()}
+function pasteKey(){let t=$('kt').value.toUpperCase(),a=[];
+ if(/[0-9]/.test(t)){const m=[...t.matchAll(/(\d+)\s*[-.:)]?\s*([ABCD])/g)];m.forEach(x=>a[+x[1]-1]=x[2])}
+ else a=t.replace(/[^ABCD]/g,'').split('');
+ const out=Array.from({length:30},(_,i)=>a[i]||'-');kdraft=out;drawKG();
+ if(a.filter(Boolean).length!=30)alert('Found '+a.filter(Boolean).length+' answers, need 30. Fix gaps (-) in the grid.')}
+function saveKey(){if(kdraft.includes('-'))return alert('Key incomplete: fix all "-" first');KEYS[kid()]=kdraft.join('');save();info();alert('Key saved')}
+function copyKey(){const s=prompt('Copy to set (A/B/C/D)?');if(!s||!KEYS[kid()])return;const p=kid().split('|');KEYS[p[0]+'|'+p[1]+'|'+s.toUpperCase()]=KEYS[kid()];save();alert('Copied')}
+function keyTemplate(){const rows=[['Subject','Test','Set',...Array.from({length:30},(_,i)=>'Q'+(i+1))]];
+ SUBJ.forEach(s=>['A','B','C','D'].forEach(x=>rows.push([s,'Test 1',x,...Array(30).fill('')])));
+ const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rows),'Keys');XLSX.writeFile(wb,'key_template.xlsx')}
+$('kx').onchange=async e=>{const wb=XLSX.read(await e.target.files[0].arrayBuffer());let n=0,bad=0;
+ XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1}).slice(1).forEach(r=>{
+  const a=r.slice(3,33).map(x=>String(x||'').trim().toUpperCase());
+  if(r[0]&&a.length==30&&a.every(x=>'ABCD'.includes(x)&&x)){KEYS[[r[0],r[1],r[2]].join('|')]=a.join('');n++}else if(r[0]&&a.some(x=>x))bad++});
+ save();info();alert(`Imported ${n} keys, ${bad} rows skipped`)};
+
+// scanner
+const rd=setInterval(()=>{if(window.cv&&cv.Mat){clearInterval(rd);$('ready').textContent=' (ready)'}},400);
+async function startCam(){try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1920},height:{ideal:1080}}});
+ $('vid').srcObject=stream;$('vid').style.display='block';$('vid').play()}catch(e){$('msg').textContent='Camera not available. Use Upload photo.'}}
+function snap(){const v=$('vid');if(!v.videoWidth)return $('msg').textContent='Open the camera first';
+ const c=document.createElement('canvas');c.width=v.videoWidth;c.height=v.videoHeight;c.getContext('2d').drawImage(v,0,0);run(c)}
+$('up').onchange=e=>{const im=new Image();im.onload=()=>{const c=document.createElement('canvas');c.width=im.width;c.height=im.height;c.getContext('2d').drawImage(im,0,0);run(c)};im.src=URL.createObjectURL(e.target.files[0])};
+function run(c){$('msg').textContent='';
+ if(!(window.cv&&cv.Mat)){$('msg').textContent='Scanner still loading, wait...';return}
+ $('msg').textContent='Processing...';setTimeout(()=>{try{process(c)}catch(e){$('msg').textContent='Error: '+e.message}},50)}
+function process(canvas){
+ const m=[];const M=x=>(m.push(x),x);
+ try{
+ let src=M(cv.imread(canvas)),g=M(new cv.Mat()),th=M(new cv.Mat());
+ cv.cvtColor(src,g,cv.COLOR_RGBA2GRAY);cv.GaussianBlur(g,g,new cv.Size(5,5),0);
+ cv.threshold(g,th,0,255,cv.THRESH_BINARY_INV+cv.THRESH_OTSU);
+ let cs=M(new cv.MatVector()),h=M(new cv.Mat());cv.findContours(th,cs,h,cv.RETR_EXTERNAL,cv.CHAIN_APPROX_SIMPLE);
+ const A=src.cols*src.rows,cand=[];
+ for(let i=0;i<cs.size();i++){const c=cs.get(i),a=cv.contourArea(c),r=cv.boundingRect(c);c.delete();
+  const ar=r.width/r.height;if(a>A*.00012&&a<A*.012&&ar>.7&&ar<1.4&&a/(r.width*r.height)>.8)cand.push([r.x+r.width/2,r.y+r.height/2])}
+ const cor=[[0,0],[src.cols,0],[src.cols,src.rows],[0,src.rows]],pts=[];
+ for(const k of cor){let b=null,bd=1e18;cand.forEach(p=>{const d=(p[0]-k[0])**2+(p[1]-k[1])**2;if(d<bd){bd=d;b=p}});
+  if(!b||Math.sqrt(bd)>.4*Math.hypot(src.cols,src.rows))return fail();pts.push(b)}
+ if(new Set(pts.map(p=>p.join())).size<4)return fail();
+ const S=L.S,W=210*S,H=297*S;
+ let sm=M(cv.matFromArray(4,1,cv.CV_32FC2,pts.flat())),dm=M(cv.matFromArray(4,1,cv.CV_32FC2,[10*S,10*S,200*S,10*S,200*S,287*S,10*S,287*S]));
+ let T=M(cv.getPerspectiveTransform(sm,dm)),wr=M(new cv.Mat());cv.warpPerspective(src,wr,T,new cv.Size(W,H));
+ let rgb=M(new cv.Mat()),hsv=M(new cv.Mat()),mask=M(new cv.Mat());
+ cv.cvtColor(wr,rgb,cv.COLOR_RGBA2RGB);cv.cvtColor(rgb,hsv,cv.COLOR_RGB2HSV);
+ cv.inRange(hsv,M(new cv.Mat(H,W,hsv.type(),[90,50,30,0])),M(new cv.Mat(H,W,hsv.type(),[135,255,255,0])),mask);
+ cv.morphologyEx(mask,mask,cv.MORPH_CLOSE,M(cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(3,3))));
+ const thr=CFG.thr/100,ans=[],rg=L.reg*S;
+ for(let q=0;q<30;q++){const rat=[];
+  for(let o=0;o<4;o++){const [x,y]=pos(q,o);const roi=mask.roi(new cv.Rect(Math.round(x*S-rg),Math.round(y*S-rg),2*rg,2*rg));rat.push(cv.countNonZero(roi)/(4*rg*rg));roi.delete()}
+  const mx=Math.max(...rat),mk=rat.filter(r=>r>=thr).length;
+  if(mk==0)ans.push('-');else if(mk>1||rat.filter(r=>r>=.6*mx).length>1)ans.push('X');else ans.push('ABCD'[rat.indexOf(mx)])}
+ const HB=L.H;
+ const rdRow=(y,x0=HB.x,st=HB.s,n=10)=>{const rat=[],r=HB.r*S;for(let i=0;i<n;i++){const roi=mask.roi(new cv.Rect(Math.round((x0+i*st)*S-r),Math.round(y*S-r),2*r,2*r));rat.push(cv.countNonZero(roi)/(4*r*r));roi.delete()}
+  const mx=Math.max(...rat),mk=rat.filter(v=>v>=thr).length;return mk==0?'':(mk>1||rat.filter(v=>v>=.6*mx).length>1)?'?':String(rat.indexOf(mx))};
+ const rdN=ys=>{const d=ys.map(y=>rdRow(y)).join('');return /^\d+$/.test(d)&&d.length==ys.length?d:''};
+ const rollS=rdN(HB.roll),codeS=rdN(HB.sch);
+ const subD=rdRow(HB.sub.y,HB.sub.x,HB.sub.s,7),subj=/^[0-9]$/.test(subD)?SUBJ[+subD]:$('subj').value,tst=$('test').value.trim();
+ const key=KEYS[[subj,tst,$('set').value].join('|')];
+ if(!key){$('msg').textContent='No answer key for '+subj+' / '+tst+' / Set '+$('set').value+'. Add it in Keys.';return}
+ const out=document.createElement('canvas');out.width=W;out.height=H;cv.imshow(out,wr);
+ const nc=document.createElement('canvas');nc.width=103*S;nc.height=8.4*S;nc.getContext('2d').drawImage(out,21*S,18.3*S,103*S,8.4*S,0,0,nc.width,nc.height);
+ cur={ans,img:out,subj,cls:$('cls').value,test:$('test').value.trim(),set:$('set').value,key,roll:rollS?String(+rollS):'',school:schoolOf(codeS),nameImg:nc.toDataURL('image/jpeg',.7)};
+ $('msg').textContent='';$('subj').value=subj;info();$('sn').value='';$('rn').value=cur.roll;$('sc').value=cur.school;$('nimg').src=cur.nameImg;
+ $('hm').textContent=cur.roll?'Roll no read from the sheet. Please check it.':'Roll no not detected. Please type it.';
+ drawRev();go('review');if(navigator.onLine)ocrName();
+ }finally{m.forEach(x=>{try{x.delete()}catch(e){}})}
+ function fail(){$('msg').textContent='Sheet not detected. Place the sheet flat, in good light, all 4 black corners visible.'}}
+function score(){return cur.ans.filter((a,i)=>a==cur.key[i]).length}
+function drawRev(){const c=$('cv'),x=c.getContext('2d');c.width=cur.img.width;c.height=cur.img.height;x.drawImage(cur.img,0,0);
+ x.lineWidth=5;cur.ans.forEach((a,q)=>{const s=a==cur.key[q]?'#16a34a':a=='X'?'#f97316':a=='-'?'#9ca3af':'#dc2626';
+  const ci=a=='X'||a=='-'?-1:'ABCD'.indexOf(a);
+  for(let o=0;o<4;o++){const [px,py]=pos(q,o);const good=o=='ABCD'.indexOf(cur.key[q]);
+   if(o==ci||(a!=cur.key[q]&&good)){x.strokeStyle=o==ci?s:'#16a34a';x.beginPath();x.arc(px*L.S,py*L.S,(L.r+1.5)*L.S,0,7);x.stroke()}}
+  if(a=='X'||a=='-'){const [px,py]=pos(q,0);x.strokeStyle=s;x.strokeRect((px-6)*L.S,(py-4)*L.S,48*L.S,8*L.S)}});
+ const sc=score();$('score').textContent=`Score ${sc}/30 (${(sc/30*100).toFixed(1)}%)`;
+ $('chips').innerHTML=cur.ans.map((a,i)=>{const c=a==cur.key[i]?'ok':a=='X'?'dbl':a=='-'?'blk':'bad';return `<div class="chip ${c}" onclick="edit(${i})">${i+1}:${a}</div>`}).join('')}
+function edit(i){const o=['-','A','B','C','D'];cur.ans[i]=o[(o.indexOf(cur.ans[i])+1)%5];drawRev()}
+function saveRes(next){if(!cur)return;const n=$('sn').value.trim(),r=$('rn').value.trim(),sch=$('sc').value.trim();if(!n||!r)return alert('Enter name and roll no');
+ const i=RES.findIndex(x=>x.roll==r&&(x.school||'')==sch&&x.subj==cur.subj&&x.test==cur.test);
+ if(i>=0&&!confirm('Roll no already saved for this subject/test. Overwrite?'))return;
+ const sc=score(),o={id:i>=0?RES[i].id:Date.now()+Math.random().toString(36).slice(2,6),name:n,roll:r,school:sch,nameImg:cur.nameImg,cls:cur.cls,subj:cur.subj,test:cur.test,set:cur.set,date:today(),ans:cur.ans.slice(),key:cur.key,score:sc};
+ if(i>=0)RES[i]=o;else RES.push(o);save();cur=null;go(next?'scan':'results')}
+
+// results & export
+function ranked(list){const s=[...list].sort((a,b)=>b.score-a.score);return s.map(x=>({...x,rank:1+s.filter(y=>y.score>x.score).length}))}
+function renderRes(){const q=$('q').value.toLowerCase();const l=ranked(RES.filter(x=>x.subj==$('subj').value&&x.test==$('test').value.trim()))
+ .filter(x=>(x.name+x.roll+(x.school||'')).toLowerCase().includes(q));
+ $('rt').innerHTML='<tr><th>Roll</th><th>Name</th><th>School</th><th>Marks</th><th>%</th><th>Rank</th><th></th></tr>'+l.map(x=>`<tr><td>${x.roll}</td><td>${x.name}</td><td>${x.school||''}</td><td>${x.score}/30</td><td>${(x.score/.3).toFixed(0)}</td><td>${x.rank}</td><td><button onclick="del('${x.id}')">🗑</button></td></tr>`).join('')}
+function del(id){if(!confirm('Delete?'))return;RES=RES.filter(x=>x.id!=id);save();renderRes()}
+function exportX(all){const wb=XLSX.utils.book_new(),subs=all?SUBJ:[$('subj').value];const sum=[['Subject','Students','Average','Highest','Lowest','Passed']];
+ subs.forEach(s=>{const l=ranked(RES.filter(x=>x.subj==s&&(all||x.test==$('test').value.trim())));if(!l.length)return;
+  const k=l[0].key;const rows=[['Answer key','','','','','','','',''].concat(k.split('')),
+   ['S.No','Roll No','Name','School','Class','Subject','Set','Test','Date',...Array.from({length:30},(_,i)=>'Q'+(i+1)),'Correct','Wrong','Blank','Double','Total','Obtained','Percentage','Rank','Status']];
+  l.forEach((x,i)=>{const c=x.ans.filter((a,j)=>a==x.key[j]).length,b=x.ans.filter(a=>a=='-').length,d=x.ans.filter(a=>a=='X').length,p=x.score/.3;
+   rows.push([i+1,x.roll,x.name,x.school||'',x.cls,x.subj,x.set,x.test,x.date,...x.ans,c,30-c-b-d,b,d,30,x.score,p.toFixed(1)+'%',x.rank,p>=CFG.pass?'Pass':'Fail'])});
+  const pc=Array.from({length:30},(_,j)=>Math.round(l.filter(x=>x.ans[j]==x.key[j]).length/l.length*100)+'%');
+  rows.push([],['Correct % per question','','','','','','','',''].concat(pc));
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rows),s.slice(0,30));
+  const sc=l.map(x=>x.score);sum.push([s,l.length,(sc.reduce((a,b)=>a+b)/l.length).toFixed(1),Math.max(...sc),Math.min(...sc),sc.filter(v=>v/.3>=CFG.pass).length])});
+ if(wb.SheetNames.length==0)return alert('No results to export');
+ XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(sum),'Summary');
+ XLSX.writeFile(wb,`${$('cls').value||'Class'}_${all?'All':$('subj').value}_${today()}.xlsx`)}
+
+function schoolOf(code){const m={};(CFG.schools||'').split('\n').forEach(l=>{const p=l.split('=');if(p[1])m[p[0].trim()]=p.slice(1).join('=').trim()});
+ return code&&Object.keys(m).length?(m[code]||'Code '+code):CFG.school}
+async function ocrName(){const mine=cur;if(!mine)return;$('hm').textContent='Reading name (needs internet, may be inaccurate)...';
+ try{if(!window.Tesseract)await new Promise((ok,no)=>{const t=document.createElement('script');t.src='https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';t.onload=ok;t.onerror=no;document.head.appendChild(t)});
+ const im=new Image();im.src=mine.nameImg;await im.decode();const c=document.createElement('canvas');c.width=im.width*2;c.height=im.height*2;const x=c.getContext('2d');x.filter='grayscale(1) contrast(1.6)';x.drawImage(im,0,0,c.width,c.height);
+ const w=await Tesseract.createWorker('eng');await w.setParameters({tessedit_char_whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZ '});const r=await w.recognize(c);await w.terminate();
+ if(cur!==mine)return;const t=r.data.text.replace(/[^A-Z ]/g,' ').replace(/\s+/g,' ').trim();
+ if(t&&!$('sn').value)$('sn').value=t;$('hm').textContent=t?'Name auto-read. Please check it against the image above.':'Could not read the name. Please type it.'}
+ catch(e){$('hm').textContent='Auto-read failed (internet needed). Please type the name.'}}
+// backup
+function backup(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify({KEYS,RES,CFG})]));a.download='omr_backup_'+today()+'.json';a.click()}
+$('rf').onchange=async e=>{const d=JSON.parse(await e.target.files[0].text());KEYS=d.KEYS||{};RES=d.RES||[];CFG=d.CFG||CFG;save();info();alert('Restored')};
+
+// printable sheet
+function renderSheet(){const HB=L.H;let h=`<div class="sheet"><div class="cn" style="left:5mm;top:5mm"></div><div class="cn" style="left:195mm;top:5mm"></div><div class="cn" style="left:195mm;top:282mm"></div><div class="cn" style="left:5mm;top:282mm"></div>
+<div style="left:20mm;top:7mm;width:170mm;text-align:center;font-size:14pt;font-weight:bold">${CFG.school||'School Name'}</div>
+<div style="left:20mm;top:13.5mm;font-size:7pt">STUDENT NAME (BLOCK CAPITALS)</div>
+<div style="left:20mm;top:17.5mm;width:105mm;height:10mm;border:.4mm solid #666"></div>
+<div style="left:20mm;top:30mm">Class: ________ Date: ____________</div><div style="left:20mm;top:37mm">Test: ____________ Set (A/B/C/D): _____</div>
+<div style="left:20mm;top:42.5mm;font-size:7pt;font-weight:bold">SUBJECT (blue cross in one circle)</div>
+<div style="left:20mm;top:57mm;width:105mm;font-weight:bold;font-size:8pt">Mark ONE circle with a BLUE pen cross (X). Double marking = zero marks.</div>
+<div style="left:${HB.x-2}mm;top:14.5mm;font-size:7pt;font-weight:bold">ROLL NO (4 digits, e.g. 0012)</div>
+<div style="left:${HB.x-2}mm;top:42.5mm;font-size:7pt;font-weight:bold">SCHOOL CODE (2 digits)</div>`;
+ [...HB.roll,...HB.sch].forEach(y=>{for(let i=0;i<10;i++)h+=`<div class="c" style="left:${HB.x+i*HB.s-2.2}mm;top:${y-2.2}mm;width:4.4mm;height:4.4mm;font-size:5pt;line-height:3.8mm">${i}</div>`});
+ ['Biology','Computer','Physics','Chemistry','English','Gen. Knowledge','Maths'].forEach((n,i)=>{const x=HB.sub.x+i*HB.sub.s;h+=`<div class="c" style="left:${x-2.2}mm;top:${HB.sub.y-2.2}mm;width:4.4mm;height:4.4mm"></div><div style="left:${x-7}mm;top:${HB.sub.y+3}mm;width:14mm;text-align:center;font-size:5pt">${n}</div>`});
+ for(let q=0;q<30;q++){const[x0,y]=pos(q,0);h+=`<div style="left:${x0-L.ox}mm;top:${y-2.5}mm;font-weight:bold">${q+1}.</div>`;
+  for(let o=0;o<4;o++){const[x]=pos(q,o);h+=`<div class="c" style="left:${x-3}mm;top:${y-3}mm">${'ABCD'[o]}</div>`}}
+ $('sheetWrap').innerHTML=h+'</div>'}
+renderSheet();info();go((location.hash||'#home').slice(1)||'home');
+</script></body></html>
